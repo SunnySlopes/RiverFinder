@@ -1,5 +1,13 @@
-#include "cubiomes/generator.h"
-#include "cubiomes/biomes.h"
+/* cubiomes' rng.h defines a C helper named lerp(), while C++20 <cmath>
+ * injects std::lerp into the global namespace. Rename the cubiomes helper
+ * while rng.h is first included, then release the macro before the other
+ * headers pull in <math.h>. */
+#define lerp cubiomes_lerp
+#include <cubiomes/rng.h>
+#undef lerp
+#include <cubiomes/generator.h>
+#include <cubiomes/biomes.h>
+#include <cubiomes/biomenoise.h>
 #include "Thread.h"
 
 #include <algorithm>
@@ -14,7 +22,86 @@
 #include <vector>
 #define AREA_SIZE 256
 
+namespace riverfinder {
+
 /* ================== 河流 / 溶洞判定 ================== */
+
+/* 旧版 cubiomes 里的 river-only 快速预筛。
+ *
+ * 它只负责在粗筛阶段尽早排除明显不是河流的格子；真正是否河流仍由
+ * climateToBiome() 给出。这里改用外部（主仓）cubiomes 的公开 API：
+ * sampleDoublePerlin / getSpline / climateToBiome，不再依赖旧版
+ * cubiomes 里那个同名但未导出的 sampleBiomeNoiseOnRiver()。
+ *
+ * 阈值来自旧实现，语义是“保守预筛”：宁可多放行，也不要把可能的河流
+ * 提前排除。26.2+ 的 ridge 折叠只改变 weirdness 的分布，不改变下面这些
+ * 气候分量的含义；如果后续验证发现漏检，可把 RIVER_STRICT_BIOME 打开，
+ * 直接用完整的 sampleBiomeNoise()。
+ */
+static inline int sampleRiverBiomeNoise(const BiomeNoise *bn, int x, int y, int z,
+                                        uint32_t sample_flags)
+{
+#ifdef RIVER_STRICT_BIOME
+    (void)bn;
+    return 0; /* unused; the call site uses sampleBiomeNoise() instead */
+#else
+    if (bn->nptype >= 0)
+    {
+        int64_t id = (int64_t) (10000.0 * sampleClimatePara(bn, nullptr, x, z));
+        return (int) id;
+    }
+
+    float t = 0, h = 0, c = 0, e = 0, d = 0, w = 0;
+    double px = x, pz = z;
+    if (!(sample_flags & SAMPLE_NO_SHIFT))
+    {
+        px += sampleDoublePerlin(&bn->climate[NP_SHIFT], x, 0, z) * 4.0;
+        pz += sampleDoublePerlin(&bn->climate[NP_SHIFT], z, x, 0) * 4.0;
+    }
+
+    w = sampleDoublePerlin(&bn->climate[NP_WEIRDNESS], px, 0, pz);
+    if (w > 0.05 || w < -0.05) return 0;
+    c = sampleDoublePerlin(&bn->climate[NP_CONTINENTALNESS], px, 0, pz);
+    if (c < -0.19) return 0;
+    e = sampleDoublePerlin(&bn->climate[NP_EROSION], px, 0, pz);
+    if (c > 0.03f && e < -0.375f) return 0;
+    t = sampleDoublePerlin(&bn->climate[NP_TEMPERATURE], px, 0, pz);
+    if (t < -0.45) return 0;
+    if (e > 0.55 && c >= -0.11) return 0;
+
+    if (!(sample_flags & SAMPLE_NO_DEPTH))
+    {
+        float np_param[] = {
+            c, e, -3.0F * (fabsf(fabsf(w) - 0.6666667F) - 0.33333334F), w,
+        };
+        double off = getSpline(bn->sp, np_param) + 0.015F;
+        d = 1.0 - (y * 4) / 128.0 - 83.0 / 160.0 + off;
+    }
+
+    h = sampleDoublePerlin(&bn->climate[NP_HUMIDITY], px, 0, pz);
+
+    int64_t l_np[6];
+    l_np[0] = (int64_t) (10000.0F * t);
+    l_np[1] = (int64_t) (10000.0F * h);
+    l_np[2] = (int64_t) (10000.0F * c);
+    l_np[3] = (int64_t) (10000.0F * e);
+    l_np[4] = (int64_t) (10000.0F * d);
+    l_np[5] = (int64_t) (10000.0F * w);
+
+    if (sample_flags & SAMPLE_NO_BIOME)
+        return none;
+    return climateToBiome(bn->mc, (const uint64_t *) l_np, nullptr);
+#endif
+}
+
+static inline int riverBiomeIdAt(const BiomeNoise *bn, int x, int y, int z)
+{
+#ifdef RIVER_STRICT_BIOME
+    return sampleBiomeNoise(bn, nullptr, x, y, z, nullptr, SAMPLE_NO_SHIFT);
+#else
+    return sampleRiverBiomeNoise(bn, x, y, z, SAMPLE_NO_SHIFT);
+#endif
+}
 
 static inline int isRiverBiomeId(int id)
 {
@@ -115,13 +202,11 @@ std::vector<Res> findBiggestRiver(
             for (int x = 0; x < W; x++)
             {
                 int worldX = startX + x * scale + scale / 2;
-                int id = sampleBiomeNoiseOnRiver(
-                    &g->bn, nullptr,
+                int id = riverBiomeIdAt(
+                    &g->bn,
                     worldX / 4,
                     y / 4 + 1,
-                    worldZ / 4,
-                    nullptr,
-                    SAMPLE_NO_SHIFT);
+                    worldZ / 4);
                 int river = isRiverBiomeId(id);
                 RAW_R(x, z) = river;
                 if (countCave)
@@ -294,148 +379,215 @@ void findBiggestRiverParallelPool(
     Progress *progress,
     int numThreads = 0)
 {
+    if (sx <= 0 || sz <= 0)
+        return;
     if (numThreads <= 0)
         numThreads = static_cast<int>(std::thread::hardware_concurrency());
     if (numThreads <= 0)
         numThreads = 1;
 
-    ThreadPool pool(numThreads);
     const int chunkSize = 4096 * 2;
     const int overlap = 256;
-    std::atomic<int> completedChunks{0};
+    const int step = chunkSize - overlap;
+    const int nx = (sx + step - 1) / step;
+    const int nz = (sz + step - 1) / step;
+
+    /* Count only chunks that are large enough for the scale-16 pass. This is
+     * also the exact progress denominator; it is computed before any worker
+     * starts, so the clamped edge chunks cannot make the bar run backwards. */
     int totalChunks = 0;
-
-    for (int x = 0; x < sx; x += chunkSize - overlap)
+    for (int ix = 0; ix < nx; ix++)
     {
-        for (int z = 0; z < sz; z += chunkSize - overlap)
+        const int x = ix * step;
+        const int currentSx = std::min(chunkSize, sx - x);
+        if (currentSx < 256)
+            continue;
+        for (int iz = 0; iz < nz; iz++)
         {
-            int currentSx = std::min(chunkSize, sx - x);
-            int currentSz = std::min(chunkSize, sz - z);
-
-            if (currentSx >= 256 && currentSz >= 256)
-            {
+            const int z = iz * step;
+            const int currentSz = std::min(chunkSize, sz - z);
+            if (currentSz >= 256)
                 totalChunks++;
-                if (progress)
-                    progress->total++;
-
-                pool.enqueue([&, x, z, currentSx, currentSz, caveFactor]() {
-                    if (progress)
-                    {
-                        if (progress->try_stop)
-                            return;
-                        while (progress->try_pause)
-                        {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                            if (progress->try_stop)
-                                return;
-                        }
-                        progress->chunkInRunning += 1;
-                    }
-
-                    Generator localG = *g;
-                    auto blockResultsX16 = findBiggestRiver<16>(
-                        &localG,
-                        startX + x,
-                        startZ + z,
-                        currentSx,
-                        currentSz,
-                        y,
-                        minScore,
-                        0.85,
-                        caveFactor);
-
-                    int bx = currentSx / 256 + 2;
-                    int bz = currentSz / 256 + 2;
-                    std::vector<Res> flags(bx * bz);
-                    for (const auto &it: blockResultsX16)
-                    {
-                        int x2 = (it.point.x - startX - x) / 256;
-                        int z2 = (it.point.y - startZ - z) / 256;
-                        if (x2 < 0 || z2 < 0 || x2 >= bx || z2 >= bz)
-                            continue;
-                        auto &slot = flags[x2 + bx * z2];
-                        if (slot.score < it.score)
-                            slot = it;
-                    }
-
-                    std::vector<Res> pqX16;
-                    pqX16.reserve(flags.size());
-                    for (auto &kv: flags)
-                        if (kv.score > 0)
-                            pqX16.push_back(kv);
-                    std::ranges::sort(pqX16, [](const Res &a, const Res &b) { return a.score > b.score; });
-
-                    std::unordered_map<uint64_t, Res> blockResultsX4;
-                    blockResultsX4.reserve(16);
-                    int maxScore = 0;
-
-                    for (auto &res: pqX16)
-                    {
-                        if (progress && progress->try_stop)
-                            break;
-                        while (progress && progress->try_pause)
-                        {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                            if (progress->try_stop)
-                                break;
-                        }
-
-                        auto subResults = findBiggestRiver<4>(
-                            &localG,
-                            res.point.x - 256,
-                            res.point.y - 256,
-                            512,
-                            512,
-                            y,
-                            minScore,
-                            1.0,
-                            caveFactor);
-
-                        if (subResults.empty())
-                            break;
-                        if (subResults[0].score < maxScore * 0.9)
-                            break;
-
-                        auto &r = subResults[0];
-                        uint64_t key = (uint64_t(uint32_t(r.point.x)) << 32) | uint32_t(r.point.y);
-                        auto it = blockResultsX4.find(key);
-                        if (it == blockResultsX4.end())
-                            blockResultsX4.emplace(key, r);
-                        else if (it->second.score < r.score)
-                            it->second = r;
-
-                        if (r.score > maxScore)
-                            maxScore = r.score;
-                    }
-
-                    std::vector<Res> filteredResults;
-                    filteredResults.reserve(blockResultsX4.size());
-                    for (const auto &result: blockResultsX4 | std::views::values)
-                    {
-                        int relX = result.point.x - (startX + x);
-                        int relZ = result.point.y - (startZ + z);
-                        if (relX > overlap / 2 && relX < currentSx - overlap / 2 &&
-                            relZ > overlap / 2 && relZ < currentSz - overlap / 2 &&
-                            result.score > 0)
-                        {
-                            filteredResults.push_back(result);
-                        }
-                    }
-                    std::ranges::sort(filteredResults, [](const Res &a, const Res &b) { return a.score > b.score; });
-                    if (!filteredResults.empty())
-                        globalResults.addResults(filteredResults);
-
-                    int completed = completedChunks.fetch_add(1) + 1;
-                    if (progress)
-                    {
-                        progress->current = completed;
-                        progress->chunkInRunning -= 1;
-                    }
-                });
-            }
         }
     }
 
     if (progress)
+    {
         progress->total = totalChunks;
+        progress->current = 0;
+        progress->chunkInRunning = 0;
+    }
+    if (totalChunks == 0)
+        return;
+
+    /* Streaming scheduler: workers pull the next chunk index from a single
+     * atomic counter. There is no task queue, so a full-world search (tens of
+     * millions of chunks) uses O(threads) memory instead of O(chunks). */
+    const int slots = nx * nz;
+    std::atomic<int> nextChunk{0};
+    std::atomic<int> completedChunks{0};
+    std::atomic<bool> failed{false};
+
+    auto worker = [&]() {
+        for (;;)
+        {
+            if (progress && progress->try_stop)
+                return;
+
+            if (progress)
+            {
+                while (progress->try_pause && !progress->try_stop)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                if (progress->try_stop)
+                    return;
+            }
+
+            const int idx = nextChunk.fetch_add(1);
+            if (idx >= slots)
+                return;
+
+            const int ix = idx % nx;
+            const int iz = idx / nx;
+            const int x = ix * step;
+            const int z = iz * step;
+            const int currentSx = std::min(chunkSize, sx - x);
+            const int currentSz = std::min(chunkSize, sz - z);
+            if (currentSx < 256 || currentSz < 256)
+                continue;
+
+            if (progress)
+                progress->chunkInRunning += 1;
+
+            try
+            {
+                Generator localG = *g;
+                auto blockResultsX16 = findBiggestRiver<16>(
+                    &localG,
+                    startX + x,
+                    startZ + z,
+                    currentSx,
+                    currentSz,
+                    y,
+                    minScore,
+                    0.85,
+                    caveFactor);
+
+                int bx = currentSx / 256 + 2;
+                int bz = currentSz / 256 + 2;
+                std::vector<Res> flags(bx * bz);
+                for (const auto &it: blockResultsX16)
+                {
+                    int x2 = (it.point.x - startX - x) / 256;
+                    int z2 = (it.point.y - startZ - z) / 256;
+                    if (x2 < 0 || z2 < 0 || x2 >= bx || z2 >= bz)
+                        continue;
+                    auto &slot = flags[x2 + bx * z2];
+                    if (slot.score < it.score)
+                        slot = it;
+                }
+
+                std::vector<Res> pqX16;
+                pqX16.reserve(flags.size());
+                for (auto &kv: flags)
+                    if (kv.score > 0)
+                        pqX16.push_back(kv);
+                std::ranges::sort(pqX16, [](const Res &a, const Res &b) { return a.score > b.score; });
+
+                std::unordered_map<uint64_t, Res> blockResultsX4;
+                blockResultsX4.reserve(16);
+                int maxScore = 0;
+
+                for (auto &res: pqX16)
+                {
+                    if (progress && progress->try_stop)
+                        break;
+                    while (progress && progress->try_pause)
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                        if (progress->try_stop)
+                            break;
+                    }
+
+                    auto subResults = findBiggestRiver<4>(
+                        &localG,
+                        res.point.x - 256,
+                        res.point.y - 256,
+                        512,
+                        512,
+                        y,
+                        minScore,
+                        1.0,
+                        caveFactor);
+
+                    if (subResults.empty())
+                        break;
+                    if (subResults[0].score < maxScore * 0.9)
+                        break;
+
+                    auto &r = subResults[0];
+                    uint64_t key = (uint64_t(uint32_t(r.point.x)) << 32) | uint32_t(r.point.y);
+                    auto it = blockResultsX4.find(key);
+                    if (it == blockResultsX4.end())
+                        blockResultsX4.emplace(key, r);
+                    else if (it->second.score < r.score)
+                        it->second = r;
+
+                    if (r.score > maxScore)
+                        maxScore = r.score;
+                }
+
+                std::vector<Res> filteredResults;
+                filteredResults.reserve(blockResultsX4.size());
+                for (const auto &result: blockResultsX4 | std::views::values)
+                {
+                    int relX = result.point.x - (startX + x);
+                    int relZ = result.point.y - (startZ + z);
+                    if (relX > overlap / 2 && relX < currentSx - overlap / 2 &&
+                        relZ > overlap / 2 && relZ < currentSz - overlap / 2 &&
+                        result.score > 0)
+                    {
+                        filteredResults.push_back(result);
+                    }
+                }
+                std::ranges::sort(filteredResults, [](const Res &a, const Res &b) { return a.score > b.score; });
+                if (!filteredResults.empty())
+                    globalResults.addResults(filteredResults);
+            }
+            catch (...)
+            {
+                /* A worker failure must not take down the whole process. Keep
+                 * the chunks that already completed and let the caller see the
+                 * progress stall rather than std::terminate. */
+                failed.store(true);
+            }
+
+            if (progress)
+            {
+                progress->chunkInRunning -= 1;
+                progress->current = completedChunks.fetch_add(1) + 1;
+            }
+            else
+            {
+                completedChunks.fetch_add(1);
+            }
+        }
+    };
+
+    const int workerCount = std::min(numThreads, totalChunks);
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<size_t>(workerCount));
+    for (int i = 0; i < workerCount; i++)
+        workers.emplace_back(worker);
+    for (auto &thread: workers)
+        thread.join();
+
+    if (progress)
+    {
+        progress->chunkInRunning = 0;
+        if (failed.load())
+            progress->try_stop = true;
+    }
 }
+
+
+} // namespace riverfinder

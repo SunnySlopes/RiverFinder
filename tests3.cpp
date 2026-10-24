@@ -3,8 +3,8 @@
 #include <stdint.h>
 #include <limits.h>
 
-#include "generator.h"
-#include "generator.h"
+#include "cubiomes/generator.h"
+#include "cubiomes/generator.h"
 #include "cubiomes/biomes.h"
 #include <set>
 #include <vector>
@@ -16,7 +16,10 @@
 #include <iostream>
 #include <functional>
 
-#include "finders.h"
+#include "cubiomes/finders.h"
+
+using riverfinder::ThreadPool;
+using riverfinder::ThreadSafeResults;
 
 #define AREA_SIZE 256// 搜索步长（不重叠）
 
@@ -285,7 +288,7 @@ int main(int argc, char **argv)
 
 
     Generator g;
-    setupGenerator(&g, MC_1_21, FORCE_OCEAN_VARIANTS);
+    setupGenerator(&g, MC_26_1, FORCE_OCEAN_VARIANTS);
 
     applySeed(&g, DIM_OVERWORLD, seed);
 

@@ -6,11 +6,24 @@ project(riverFinderLibJ LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
+
+# ========= 外部 cubiomes =========
+#
+# 这里不再使用 riverfinder 自带的旧 cubiomes。默认指向
+# <riverfinder>/../cubiomes；独立构建时用 -DRIVER_CUBIOMES_DIR=... 指定。
+set(RIVER_CUBIOMES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../cubiomes"
+    CACHE PATH "Path to an external cubiomes checkout")
+if (NOT EXISTS "${RIVER_CUBIOMES_DIR}/generator.c")
+    message(FATAL_ERROR
+        "RIVER_CUBIOMES_DIR does not look like cubiomes: ${RIVER_CUBIOMES_DIR}")
+endif()
+get_filename_component(CUBIOMES_INCLUDE_ROOT "${RIVER_CUBIOMES_DIR}" DIRECTORY)
 
 # ========= 查找 JNI =========
 
@@ -20,14 +33,13 @@ find_package(JNI REQUIRED)
 
 set(SOURCES
         sunnyslopes_riverfinder_RiverFinderBridge.cpp
-        ../cubiomes/finders.c
-        ../cubiomes/generator.c
-        ../cubiomes/layers.c
-        ../cubiomes/biomenoise.c
-        ../cubiomes/biomes.c
-        ../cubiomes/noise.c
-        ../cubiomes/util.c
-        ../cubiomes/quadbase.c
+        ${RIVER_CUBIOMES_DIR}/generator.c
+        ${RIVER_CUBIOMES_DIR}/layers.c
+        ${RIVER_CUBIOMES_DIR}/biomenoise.c
+        ${RIVER_CUBIOMES_DIR}/biomes.c
+        ${RIVER_CUBIOMES_DIR}/noise.c
+        ${RIVER_CUBIOMES_DIR}/util.c
+        ${RIVER_CUBIOMES_DIR}/quadbase.c
 )
 
 # ========= 构建 JNI 动态库 =========
@@ -36,7 +48,8 @@ add_library(riverFinderLibJ SHARED ${SOURCES})
 
 target_include_directories(riverFinderLibJ PRIVATE
         ${JNI_INCLUDE_DIRS}
-        ../cubiomes
+        "${CUBIOMES_INCLUDE_ROOT}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
 
 # ========= 编译优化 =========
@@ -50,7 +63,7 @@ else()
     target_compile_options(riverFinderLibJ PRIVATE
             -O3
             -DNDEBUG
-            -ffast-math
+            -ffp-contract=off
             -march=native
     )
 endif()

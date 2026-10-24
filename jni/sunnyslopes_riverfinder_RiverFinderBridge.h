@@ -17,6 +17,18 @@ JNIEXPORT jintArray JNICALL Java_sunnyslopes_riverfinder_RiverFinderBridge_river
 
 /*
  * Class:     sunnyslopes_riverfinder_RiverFinderBridge
+ * Method:    riverSearchEx
+ * Signature: (JIIIIIIIFIF)[I
+ *
+ * Explicit-version entry point: mc is a cubiomes MCVersion id
+ * (e.g. MC_26_1 or MC_26_3). The old riverSearch() keeps its
+ * 1.21.3 behaviour for compatibility.
+ */
+JNIEXPORT jintArray JNICALL Java_sunnyslopes_riverfinder_RiverFinderBridge_riverSearchEx
+  (JNIEnv *, jclass, jlong, jint, jint, jint, jint, jint, jint, jint, jfloat, jint, jfloat);
+
+/*
+ * Class:     sunnyslopes_riverfinder_RiverFinderBridge
  * Method:    getSearchProgress
  * Signature: ()[I
  */

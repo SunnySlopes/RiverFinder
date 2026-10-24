@@ -3,6 +3,8 @@
 //
 #include "sunnyslopes_riverfinder_RiverFinderBridge.h"
 
+#include <cubiomes/biomes.h>
+
 #include <cstring>
 #include <vector>
 #include <set>
@@ -11,6 +13,8 @@
 #include <ranges>
 
 #include "../river_finder.cpp"
+
+using namespace riverfinder;
 
 std::vector<Res> dedup(const std::vector<Res> &v)
 {
@@ -45,13 +49,17 @@ static jintArray toJavaArray(JNIEnv *env, const std::vector<Res> &finallyResults
     return jResults;
 }
 
-JNIEXPORT jintArray JNICALL Java_sunnyslopes_riverfinder_RiverFinderBridge_riverSearch(
-    JNIEnv *env, jclass clazz, jlong seed, jint startX, jint startZ,
-    jint width, jint height, jint y, jint minArea, jfloat opV, jint numThreads, jfloat caveFactor)
+static jintArray riverSearchImpl(JNIEnv *env, jclass clazz, jlong seed, jint mc,
+                                 jint startX, jint startZ, jint width, jint height,
+                                 jint y, jint minArea, jfloat opV, jint numThreads,
+                                 jfloat caveFactor)
 {
     (void) clazz;
+    if (mc <= MC_UNDEF || mc < MC_1_18 || mc > MC_NEWEST)
+        mc = MC_26_1;
+
     Generator g;
-    setupGenerator(&g, MC_1_21_3, FORCE_OCEAN_VARIANTS);
+    setupGenerator(&g, mc, FORCE_OCEAN_VARIANTS);
     applySeed(&g, DIM_OVERWORLD, seed);
 
     const double caveF = static_cast<double>(caveFactor);
@@ -122,6 +130,22 @@ JNIEXPORT jintArray JNICALL Java_sunnyslopes_riverfinder_RiverFinderBridge_river
     progress.phase1 = -1;
     std::ranges::sort(finallyResults, [](const Res &a, const Res &b) { return a.score > b.score; });
     return toJavaArray(env, finallyResults);
+}
+
+JNIEXPORT jintArray JNICALL Java_sunnyslopes_riverfinder_RiverFinderBridge_riverSearch(
+    JNIEnv *env, jclass clazz, jlong seed, jint startX, jint startZ,
+    jint width, jint height, jint y, jint minArea, jfloat opV, jint numThreads, jfloat caveFactor)
+{
+    return riverSearchImpl(env, clazz, seed, MC_1_21_3, startX, startZ,
+                           width, height, y, minArea, opV, numThreads, caveFactor);
+}
+
+JNIEXPORT jintArray JNICALL Java_sunnyslopes_riverfinder_RiverFinderBridge_riverSearchEx(
+    JNIEnv *env, jclass clazz, jlong seed, jint mc, jint startX, jint startZ,
+    jint width, jint height, jint y, jint minArea, jfloat opV, jint numThreads, jfloat caveFactor)
+{
+    return riverSearchImpl(env, clazz, seed, mc, startX, startZ,
+                           width, height, y, minArea, opV, numThreads, caveFactor);
 }
 
 JNIEXPORT jintArray JNICALL Java_sunnyslopes_riverfinder_RiverFinderBridge_getSearchProgress(

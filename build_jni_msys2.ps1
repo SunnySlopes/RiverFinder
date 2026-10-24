@@ -31,23 +31,29 @@ if (-not $JavaHome -or -not (Test-Path (Join-Path $JavaHome "include\jni.h"))) {
 New-Item -ItemType Directory -Force -Path $OutDir, $ObjDir | Out-Null
 $env:PATH = "$MsysBin;$(Join-Path $MsysRoot 'usr\bin');$env:PATH"
 
+# Put the external cubiomes include root first: RiverFinderBase/cubiomes is the
+# old vendored copy and must not shadow the external 26.3-capable checkout.
 $Includes = @(
+    "-I$(Join-Path $Root '..')",
     "-I$Root",
-    "-I$(Join-Path $Root 'cubiomes')",
     "-I$(Join-Path $Root 'jni')",
     "-I$(Join-Path $JavaHome 'include')",
     "-I$(Join-Path $JavaHome 'include\win32')"
 )
 
+$CubiomesRoot = Join-Path $Root "..\cubiomes"
+if (-not (Test-Path (Join-Path $CubiomesRoot "generator.c"))) {
+    throw "External cubiomes not found at $CubiomesRoot. Place cubiomes next to riverfinder or pass an explicit include path."
+}
+
 $CSources = @(
-    "cubiomes\finders.c",
-    "cubiomes\generator.c",
-    "cubiomes\layers.c",
-    "cubiomes\biomenoise.c",
-    "cubiomes\biomes.c",
-    "cubiomes\noise.c",
-    "cubiomes\util.c",
-    "cubiomes\quadbase.c"
+    "..\cubiomes\generator.c",
+    "..\cubiomes\layers.c",
+    "..\cubiomes\biomenoise.c",
+    "..\cubiomes\biomes.c",
+    "..\cubiomes\noise.c",
+    "..\cubiomes\util.c",
+    "..\cubiomes\quadbase.c"
 )
 
 # river_finder.cpp is #included by the JNI bridge translation unit
@@ -60,7 +66,7 @@ foreach ($src in $CSources) {
     $name = [IO.Path]::GetFileNameWithoutExtension($src)
     $obj = Join-Path $ObjDir "$name.o"
     Write-Host "CC  $src"
-    & $Gcc -O2 -DNDEBUG -D_WIN32 -std=c11 @Includes -c (Join-Path $Root $src) -o $obj
+    & $Gcc -O2 -DNDEBUG -D_WIN32 -std=c11 -ffp-contract=off @Includes -c (Join-Path $Root $src) -o $obj
     if ($LASTEXITCODE -ne 0) { throw "gcc failed on $src" }
     $Objs += $obj
 }
@@ -69,14 +75,14 @@ foreach ($src in $CppSources) {
     $name = [IO.Path]::GetFileNameWithoutExtension($src)
     $obj = Join-Path $ObjDir "$name.o"
     Write-Host "CXX $src"
-    & $Gxx -O2 -DNDEBUG -D_WIN32 -std=c++20 @Includes -c (Join-Path $Root $src) -o $obj
+    & $Gxx -O2 -DNDEBUG -D_WIN32 -std=c++20 -ffp-contract=off @Includes -c (Join-Path $Root $src) -o $obj
     if ($LASTEXITCODE -ne 0) { throw "g++ failed on $src" }
     $Objs += $obj
 }
 
 $Dll = Join-Path $OutDir "libriverFinderLibJ.dll"
 Write-Host "LINK $Dll"
-& $Gxx -shared -o $Dll @Objs -static-libgcc -static-libstdc++ "-Wl,--kill-at"
+& $Gxx -shared -static -o $Dll @Objs -static-libgcc -static-libstdc++ "-Wl,--kill-at"
 if ($LASTEXITCODE -ne 0) { throw "link failed" }
 Write-Host "Built $Dll"
 Get-Item $Dll | Format-List FullName, Length, LastWriteTime

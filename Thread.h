@@ -2,8 +2,8 @@
 // Created by zhdds on 2026/1/20.
 //
 
-#ifndef CUBIOMES_THREAD_H
-#define CUBIOMES_THREAD_H
+#ifndef RIVERFINDER_THREAD_H
+#define RIVERFINDER_THREAD_H
 #include <queue>
 #include <mutex>
 #include <thread>
@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <iostream>
 #include <ranges>
+
+namespace riverfinder {
 
 template<typename T>
 class ThreadSafeResults {
@@ -128,4 +130,7 @@ public:
         }
     }
 };
-#endif //CUBIOMES_THREAD_H
+
+} // namespace riverfinder
+
+#endif //RIVERFINDER_THREAD_H

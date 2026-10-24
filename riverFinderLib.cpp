@@ -2,7 +2,12 @@
 // Created by zhdds on 2026/3/15.
 //
 
+#ifndef RIVERFINDER_EXPORTS
+#define RIVERFINDER_EXPORTS
+#endif
 #include "riverFinderLib.h"
+
+#include <cubiomes/biomes.h>
 
 #include <cstring>
 #include <cstdlib>
@@ -10,12 +15,18 @@
 
 #include "river_finder.cpp"
 
-inline int *riverSearch(long long seed, int startX, int startZ, int width, int height, int y, int minArea,
-                        int numThreads, float caveFactor)
+using namespace riverfinder;
+
+static int *riverSearchImpl(long long seed, int mc,
+                            int startX, int startZ, int width, int height, int y, int minArea,
+                            int numThreads, float caveFactor)
 {
+    if (mc <= MC_UNDEF || mc < MC_1_18 || mc > MC_NEWEST)
+        mc = MC_26_1;
+
     Progress progress{};
     Generator g;
-    setupGenerator(&g, MC_1_21_3, FORCE_OCEAN_VARIANTS);
+    setupGenerator(&g, mc, FORCE_OCEAN_VARIANTS);
     applySeed(&g, DIM_OVERWORLD, seed);
 
     const double caveF = static_cast<double>(caveFactor);
@@ -34,7 +45,7 @@ inline int *riverSearch(long long seed, int startX, int startZ, int width, int h
     {
         auto temp = findBiggestRiver<1>(&g, it.point.x - 128 - 32, it.point.y - 128 - 32, 256 + 64, 256 + 64, y, 1, 1.0,
                                         caveF);
-        if (!temp.empty() && temp[0].score > maxScore * 0.8)
+        if (!temp.empty() && temp[0].score > maxScore * 0.9)
         {
             finallyResults.push_back(temp[0]);
             if (temp[0].score > maxScore)
@@ -60,4 +71,19 @@ inline int *riverSearch(long long seed, int startX, int startZ, int width, int h
     result[i++] = 0;
     result[i++] = 0;
     return result;
+}
+
+int *riverSearch(long long seed, int startX, int startZ, int width, int height, int y, int minArea,
+                 int numThreads, float caveFactor)
+{
+    /* Legacy behaviour: the old library was pinned to 1.21.3. */
+    return riverSearchImpl(seed, MC_1_21_3, startX, startZ, width, height, y, minArea,
+                           numThreads, caveFactor);
+}
+
+int *riverSearchEx(long long seed, int mc, int startX, int startZ, int width, int height, int y, int minArea,
+                   int numThreads, float caveFactor)
+{
+    return riverSearchImpl(seed, mc, startX, startZ, width, height, y, minArea,
+                           numThreads, caveFactor);
 }
