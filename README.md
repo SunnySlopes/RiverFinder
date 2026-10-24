@@ -17,8 +17,7 @@
 ```
 
 也就是 All-In-One Finder 工作区里的 `tools/cubiomes`。独立构建时用
-`-DRIVER_CUBIOMES_DIR=<path-to-cubiomes>` 指定。仓库内自带的
-`cubiomes/` 是旧版遗留目录，构建时不会使用。
+`-DRIVER_CUBIOMES_DIR=<path-to-cubiomes>` 指定；子模块不再包含 `cubiomes/`。
 
 ```powershell
 cmake -S . -B build -G Ninja -DRIVER_CUBIOMES_DIR=../cubiomes

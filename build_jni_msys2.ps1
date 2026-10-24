@@ -31,8 +31,8 @@ if (-not $JavaHome -or -not (Test-Path (Join-Path $JavaHome "include\jni.h"))) {
 New-Item -ItemType Directory -Force -Path $OutDir, $ObjDir | Out-Null
 $env:PATH = "$MsysBin;$(Join-Path $MsysRoot 'usr\bin');$env:PATH"
 
-# Put the external cubiomes include root first: RiverFinderBase/cubiomes is the
-# old vendored copy and must not shadow the external 26.3-capable checkout.
+# The submodule no longer vendors cubiomes; prefer the external checkout's
+# include root over the submodule directory.
 $Includes = @(
     "-I$(Join-Path $Root '..')",
     "-I$Root",

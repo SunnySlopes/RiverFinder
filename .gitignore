@@ -45,9 +45,3 @@ Desktop.ini
 .cproject
 .project
 .settings/
-
-# cubiomes docs build leftovers
-cubiomes/docs/*.aux
-cubiomes/docs/*.log
-cubiomes/docs/*.synctex.gz
-cubiomes/docs/*.toc
