@@ -7,6 +7,8 @@ version = '1.1.0'
 
 def nativeOutDir = layout.buildDirectory.dir('native').get().asFile
 def objDir = layout.buildDirectory.dir('obj').get().asFile
+def cliOutDir = layout.buildDirectory.dir('cli').get().asFile
+def cliObjDir = layout.buildDirectory.dir('cli-obj').get().asFile
 
 def msysRoot = System.getenv('MSYS2_ROOT') ?: 'C:\\msys64'
 def msysBin = file("${msysRoot}/ucrt64/bin")
@@ -68,6 +70,42 @@ tasks.register('copyNativeArtifacts') {
 
 tasks.named('assemble') {
     dependsOn copyNativeArtifacts
+}
+
+// Self-contained C++ CLI. It links the same engine and the nested cubiomes
+// checkout, so the resulting exe needs no DLL or external source tree.
+tasks.register('buildCliMsys2', Exec) {
+    group = 'build'
+    description = 'Build the standalone riverfinder-cli.exe via MSYS2 UCRT64 gcc/g++'
+    outputs.dir(cliOutDir)
+
+    doFirst {
+        if (!file("${msysBin}/gcc.exe").exists() || !file("${msysBin}/g++.exe").exists()) {
+            throw new GradleException("MSYS2 gcc/g++ not found under ${msysBin}")
+        }
+        cliOutDir.mkdirs()
+        cliObjDir.mkdirs()
+    }
+
+    def script = file('build_cli_msys2.ps1')
+    commandLine 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', script.absolutePath,
+        '-OutDir', cliOutDir.absolutePath,
+        '-ObjDir', cliObjDir.absolutePath
+}
+
+tasks.register('copyCliArtifact') {
+    dependsOn buildCliMsys2
+    group = 'build'
+    description = 'Ensure the standalone CLI is in build/cli'
+    outputs.file(new File(cliOutDir, 'riverfinder-cli.exe'))
+    doLast {
+        def exe = new File(cliOutDir, 'riverfinder-cli.exe')
+        if (!exe.exists()) {
+            throw new GradleException("Standalone CLI missing after MSYS2 build: ${exe}")
+        }
+        logger.lifecycle("Standalone CLI ready: ${exe}")
+    }
 }
 
 configurations {

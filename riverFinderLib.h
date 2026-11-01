@@ -5,10 +5,21 @@
 #ifndef RIVERFINDER_RIVERFINDERLIB_H
 #define RIVERFINDER_RIVERFINDERLIB_H
 
-#ifdef RIVERFINDER_EXPORTS
+/*
+ * The C ABI is shared by the JNI DLL and the standalone CLI.
+ *
+ * Static consumers (the CLI and any embedding project that links the
+ * riverfinder static library) define RIVERFINDER_STATIC. Only a real DLL
+ * build uses dllexport/dllimport.
+ */
+#if defined(RIVERFINDER_STATIC)
+#define RIVERFINDER_API
+#elif defined(_WIN32) && defined(RIVERFINDER_EXPORTS)
 #define RIVERFINDER_API __declspec(dllexport)
-#else
+#elif defined(_WIN32)
 #define RIVERFINDER_API __declspec(dllimport)
+#else
+#define RIVERFINDER_API
 #endif
 
 #ifdef __cplusplus

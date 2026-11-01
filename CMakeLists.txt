@@ -26,23 +26,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 
 # ---------------------------------------------------------------------------
-# External cubiomes.
+# cubiomes.
 #
-# This repository no longer vendors cubiomes. It builds against the cubiomes
-# checkout that the caller points at. The default layout is the All-In-One
-# Finder workspace:
+# cubiomes is a nested submodule of this repository:
 #
-#   <repo>/../cubiomes      (i.e. tools/cubiomes in the app tree)
+#   RiverFinderBase/cubiomes      (this checkout)
 #
-# For a standalone checkout pass:
+# A standalone build therefore needs no external source tree. CI or an
+# embedding project that already owns a cubiomes checkout can still override
+# the path:
+#
 #   -DRIVER_CUBIOMES_DIR=<path-to-cubiomes>
 # ---------------------------------------------------------------------------
-set(RIVER_CUBIOMES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../cubiomes"
-    CACHE PATH "Path to an external cubiomes checkout")
+set(RIVER_CUBIOMES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cubiomes"
+    CACHE PATH "Path to the cubiomes checkout")
 if (NOT EXISTS "${RIVER_CUBIOMES_DIR}/generator.c")
     message(FATAL_ERROR
         "RIVER_CUBIOMES_DIR does not look like cubiomes: ${RIVER_CUBIOMES_DIR}\n"
-        "Pass -DRIVER_CUBIOMES_DIR=<path-to-cubiomes>.")
+        "Run 'git submodule update --init --recursive' in RiverFinderBase, "
+        "or pass -DRIVER_CUBIOMES_DIR=<path-to-cubiomes>.")
 endif()
 
 # The sources include "cubiomes/generator.h", so the include root is the
@@ -72,10 +74,39 @@ target_include_directories(riverfinder PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-target_compile_options(riverfinder PRIVATE
-    $<$<COMPILE_LANGUAGE:C>:-O3;-DNDEBUG>
-    $<$<COMPILE_LANGUAGE:CXX>:-O3;-DNDEBUG;-ffp-contract=off>
+# The C ABI header selects __declspec(dllimport/export) only for DLL builds.
+# Both the static library and the CLI use the static branch.
+target_compile_definitions(riverfinder PUBLIC RIVERFINDER_STATIC)
+
+if (NOT MSVC)
+    target_compile_options(riverfinder PRIVATE
+        $<$<COMPILE_LANGUAGE:C>:-O3;-DNDEBUG>
+        $<$<COMPILE_LANGUAGE:CXX>:-O3;-DNDEBUG;-ffp-contract=off>
+    )
+endif()
+
+# ---------------------------------------------------------------------------
+# Standalone command-line program.
+#
+# The executable is self-contained: it links the static library above, which
+# already contains the cubiomes sources. It can be copied to another machine
+# without the submodule or the DLL.
+# ---------------------------------------------------------------------------
+add_executable(riverfinder-cli
+    river_cli.cpp
 )
+target_link_libraries(riverfinder-cli PRIVATE riverfinder)
+set_target_properties(riverfinder-cli PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
+if (MINGW)
+    target_link_options(riverfinder-cli PRIVATE
+        -static
+        -static-libgcc
+        -static-libstdc++
+    )
+endif()
 
 if (NOT WIN32)
     target_link_libraries(riverfinder PUBLIC m)

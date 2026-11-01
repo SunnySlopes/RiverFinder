@@ -31,29 +31,28 @@ if (-not $JavaHome -or -not (Test-Path (Join-Path $JavaHome "include\jni.h"))) {
 New-Item -ItemType Directory -Force -Path $OutDir, $ObjDir | Out-Null
 $env:PATH = "$MsysBin;$(Join-Path $MsysRoot 'usr\bin');$env:PATH"
 
-# The submodule no longer vendors cubiomes; prefer the external checkout's
-# include root over the submodule directory.
+# cubiomes is a nested submodule of RiverFinderBase. The include root is the
+# submodule root itself, because the sources include "cubiomes/...".
 $Includes = @(
-    "-I$(Join-Path $Root '..')",
     "-I$Root",
     "-I$(Join-Path $Root 'jni')",
     "-I$(Join-Path $JavaHome 'include')",
     "-I$(Join-Path $JavaHome 'include\win32')"
 )
 
-$CubiomesRoot = Join-Path $Root "..\cubiomes"
+$CubiomesRoot = Join-Path $Root "cubiomes"
 if (-not (Test-Path (Join-Path $CubiomesRoot "generator.c"))) {
-    throw "External cubiomes not found at $CubiomesRoot. Place cubiomes next to riverfinder or pass an explicit include path."
+    throw "cubiomes submodule not found at $CubiomesRoot. Run 'git submodule update --init --recursive' in RiverFinderBase."
 }
 
 $CSources = @(
-    "..\cubiomes\generator.c",
-    "..\cubiomes\layers.c",
-    "..\cubiomes\biomenoise.c",
-    "..\cubiomes\biomes.c",
-    "..\cubiomes\noise.c",
-    "..\cubiomes\util.c",
-    "..\cubiomes\quadbase.c"
+    "cubiomes\generator.c",
+    "cubiomes\layers.c",
+    "cubiomes\biomenoise.c",
+    "cubiomes\biomes.c",
+    "cubiomes\noise.c",
+    "cubiomes\util.c",
+    "cubiomes\quadbase.c"
 )
 
 # river_finder.cpp is #included by the JNI bridge translation unit

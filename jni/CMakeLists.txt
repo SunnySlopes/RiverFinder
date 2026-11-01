@@ -13,15 +13,16 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# ========= 外部 cubiomes =========
+# ========= cubiomes =========
 #
-# 这里不再使用 riverfinder 自带的旧 cubiomes。默认指向
-# <riverfinder>/../cubiomes；独立构建时用 -DRIVER_CUBIOMES_DIR=... 指定。
+# cubiomes 是 RiverFinderBase 的嵌套子模块，默认位于 <RiverFinderBase>/cubiomes。
+# 独立构建时仍可用 -DRIVER_CUBIOMES_DIR=... 指定另一份 checkout。
 set(RIVER_CUBIOMES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../cubiomes"
-    CACHE PATH "Path to an external cubiomes checkout")
+    CACHE PATH "Path to the cubiomes checkout")
 if (NOT EXISTS "${RIVER_CUBIOMES_DIR}/generator.c")
     message(FATAL_ERROR
-        "RIVER_CUBIOMES_DIR does not look like cubiomes: ${RIVER_CUBIOMES_DIR}")
+        "RIVER_CUBIOMES_DIR does not look like cubiomes: ${RIVER_CUBIOMES_DIR}\n"
+        "Run 'git submodule update --init --recursive' in RiverFinderBase.")
 endif()
 get_filename_component(CUBIOMES_INCLUDE_ROOT "${RIVER_CUBIOMES_DIR}" DIRECTORY)
 
